@@ -296,18 +296,28 @@ See [REFUND_WORKFLOW.md](REFUND_WORKFLOW.md) for details.
 
 ## Dispute Management
 
-Disputes model the chargeback lifecycle:
+Disputes model the chargeback lifecycle against **captured or settled** payments.
 
 ```
 opened  →  under_review  →  won / lost
 ```
 
-| Action | Effect |
-|--------|--------|
-| **Open dispute** | Payment state automatically transitions to `chargeback` |
-| **Submit evidence** | Dispute moves to `under_review` |
-| **Resolve (won)** | Merchant wins — funds retained |
-| **Resolve (lost)** | Merchant loses — funds returned to cardholder |
+| Action | Endpoint | Effect |
+|--------|----------|--------|
+| **Open dispute** | `POST /disputes` | Dispute created as `opened`; payment auto-transitions to `chargeback` |
+| **Submit evidence** | `POST /disputes/{id}/submit-evidence` | Dispute moves to `under_review`; evidence text stored |
+| **Resolve (won)** | `POST /disputes/{id}/resolve` | Merchant wins — funds retained |
+| **Resolve (lost)** | `POST /disputes/{id}/resolve` | Merchant loses — funds returned to cardholder |
+
+**Behavior details:**
+
+- Idempotency is enforced on all dispute write endpoints
+- A ledger entry is written **first** for each state change (`dispute.opened`, `dispute.under_review`, `dispute.won`, `dispute.lost`)
+- Outbox events mirror ledger events for webhook delivery
+- Invalid state transitions return `409`; invalid resolution outcomes return `400`
+- Dispute data is persisted in `data/idempotency/disputes_store.json` (current state) and `data/ledger/disputes.jsonl` (immutable event history)
+
+See [DISPUTE_WORKFLOW.md](DISPUTE_WORKFLOW.md) for the full walkthrough.
 
 ---
 
@@ -335,7 +345,19 @@ The Vault Service acts as a **PCI boundary**, isolating raw card data from the r
 - **Minimal exposure** — Only `/charge-token` returns the actual PAN (for provider authorization); `/detokenize` returns only last-four and metadata
 - **CVV never stored** — Follows PCI DSS rules (CVV discarded after authorization)
 
-See [VAULT_OVERVIEW.md](VAULT_OVERVIEW.md) for the full explanation.
+### VaultCrypto + Fernet/MultiFernet
+
+The `VaultCrypto` class (`backend/shared/crypto.py`) wraps `cryptography.fernet.Fernet` and `MultiFernet`:
+
+- **Key bootstrap** — On init, `_ensure_keys()` creates `data/vault/keys.json` with a generated Fernet key if missing
+- **Encrypt** — `MultiFernet.encrypt()` always uses the **first** (newest) key
+- **Decrypt** — `MultiFernet.decrypt()` tries keys in order until one succeeds
+- **Rotate** — `rotate_key()` generates a new key and prepends it; old keys remain so existing ciphertext stays decryptable
+- **No re-encryption** — Rotation does not re-encrypt existing data; old PANs are decrypted using their original key
+
+Key storage: `data/vault/keys.json` — keys never leave the vault service over HTTP.
+
+See [VAULT_OVERVIEW.md](VAULT_OVERVIEW.md) for the full explanation including encryption flow and key storage details.
 
 ---
 
@@ -876,6 +898,7 @@ Use the **Providers** page to inject failures into `providerA`. After 5 consecut
 |----------|-------------|
 | [PAYMENT_WORKFLOW.md](PAYMENT_WORKFLOW.md) | Detailed payment lifecycle explanation |
 | [REFUND_WORKFLOW.md](REFUND_WORKFLOW.md) | Maker-checker refund approval process |
-| [VAULT_OVERVIEW.md](VAULT_OVERVIEW.md) | Tokenization and encryption deep dive |
+| [DISPUTE_WORKFLOW.md](DISPUTE_WORKFLOW.md) | Chargeback lifecycle, state machine, and error handling |
+| [VAULT_OVERVIEW.md](VAULT_OVERVIEW.md) | Tokenization, encryption, VaultCrypto/Fernet/MultiFernet deep dive |
 | [PROVIDER_SELECTION.md](PROVIDER_SELECTION.md) | Provider routing rules and configuration |
 | [Swagger UI](http://localhost:8026/docs) | Interactive API documentation (when running) |
