@@ -1,0 +1,90 @@
+version: "3.9"
+
+services:
+  api-gateway:
+    build: ./backend/api_gateway
+    ports:
+      - "8026:8026"
+    env_file: .env
+    volumes:
+      - ./backend/api_gateway:/app
+      - ./backend/shared:/app/shared
+      - ./data:/app/data
+    depends_on:
+      - vault-service
+      - provider-sim
+    command: uvicorn main:app --host 0.0.0.0 --port 8026 --reload
+    networks:
+      - payrail
+
+  vault-service:
+    build: ./backend/vault_service
+    env_file: .env
+    volumes:
+      - ./backend/vault_service:/app
+      - ./backend/shared:/app/shared
+      - ./data:/app/data
+    command: uvicorn main:app --host 0.0.0.0 --port 8027 --reload
+    networks:
+      - payrail
+
+  provider-sim:
+    build: ./backend/provider_sim
+    env_file: .env
+    volumes:
+      - ./backend/provider_sim:/app
+      - ./backend/shared:/app/shared
+      - ./data:/app/data
+    command: uvicorn main:app --host 0.0.0.0 --port 8028 --reload
+    networks:
+      - payrail
+
+  ledger-jobs:
+    build: ./backend/ledger_jobs
+    env_file: .env
+    volumes:
+      - ./backend/ledger_jobs:/app
+      - ./backend/shared:/app/shared
+      - ./data:/app/data
+    depends_on:
+      - api-gateway
+    command: python main.py
+    networks:
+      - payrail
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3026:3026"
+    env_file: .env
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8026
+      - INTERNAL_API_URL=http://api-gateway:8026
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api-gateway
+    command: npm run dev
+    networks:
+      - payrail
+
+  seed:
+    build: ./backend/api_gateway
+    env_file: .env
+    volumes:
+      - ./scripts:/app/scripts
+      - ./backend/shared:/app/shared
+      - ./data:/app/data
+    command: python /app/scripts/seed_data.py
+    depends_on:
+      - api-gateway
+    profiles:
+      - seed
+    networks:
+      - payrail
+
+networks:
+  payrail:
+    driver: bridge

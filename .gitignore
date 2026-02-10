@@ -1,0 +1,15 @@
+data/**
+!data/.gitkeep
+__pycache__/
+*.pyc
+.env
+.env.local
+.env.*
+node_modules/
+.next/
+*.lock
+*.log
+.DS_Store
+CLAUDE.md
+AGENTS.md
+.claude/
